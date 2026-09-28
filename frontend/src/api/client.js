@@ -5,6 +5,7 @@ export const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://127.0.0.1
 const api = axios.create({
   baseURL: BACKEND_URL,
   timeout: 45000,
+  withCredentials: true,
   headers: {
     'Content-Type': 'application/json',
   },
@@ -61,15 +62,16 @@ export const documentsApi = {
     const formData = new FormData();
     formData.append('file', file);
     const res = await api.post('/api/v1/upload', formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
       onUploadProgress,
     });
     return res.data;
   },
   getStatus: async (jobId) => {
     const res = await api.get(`/api/v1/status/${jobId}`);
+    return res.data;
+  },
+  getSuggestions: async (docId) => {
+    const res = await api.get(`/api/v1/documents/${docId}/suggestions`);
     return res.data;
   },
   list: async () => {
@@ -89,7 +91,7 @@ export const chatApi = {
     return res.data;
   },
   getHistory: async (sessionId) => {
-    const res = await api.get(`/api/v1/chat/history/${sessionId}`);
+    const res = await api.get('/api/v1/chat/history', { params: { session_id: sessionId } });
     return res.data;
   },
 };

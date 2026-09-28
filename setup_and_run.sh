@@ -24,6 +24,9 @@
 
 set -euo pipefail
 
+REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+cd "$REPO_ROOT"
+
 BACKEND_DIR="Backend Development"
 REACT_DIR="frontend"
 STREAMLIT_DIR="Frontend Development"
@@ -125,10 +128,7 @@ fi
 
 if [[ "$WITH_STREAMLIT" -eq 1 && -d "$STREAMLIT_DIR" ]]; then
   echo "==> Starting Streamlit frontend on http://localhost:8501..."
-  (
-    cd "$STREAMLIT_DIR"
-    exec streamlit run app.py
-  ) &
+  streamlit run "$STREAMLIT_DIR/app.py" &
   PIDS+=($!)
 fi
 

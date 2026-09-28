@@ -91,28 +91,41 @@ async def log_telemetry_trace(trace_id: str, session_id: str, query: str, output
 # DYNAMIC RAG / AGENT FALLBACKS
 # -----------------------------------------------------------------------------
 
-def _retrieve_context(query: str, user_id: str = "guest_user", limit: int = 4) -> tuple[List[str], List[Dict[str, Any]]]:
+def _retrieve_context(
+    query: str,
+    user_id: str = "guest_user",
+    limit: int = 4,
+    document_id: Optional[str] = None,
+) -> tuple[List[str], List[Dict[str, Any]]]:
     """Queries Qdrant for matching document chunks."""
     retrieved_texts: List[str] = []
     citations_data: List[Dict[str, Any]] = []
 
     try:
         from Ingestion.embedder import search_user_knowledge_base
-        raw_results = search_user_knowledge_base(user_id=user_id, query=query, limit=limit)
+        raw_results = search_user_knowledge_base(
+            user_id=user_id, query=query, limit=limit, document_id=document_id
+        )
         
         # If user-scoped retrieval returns empty, try guest/global pool
         if not raw_results and user_id != "guest_user":
-            raw_results = search_user_knowledge_base(user_id="guest_user", query=query, limit=limit)
+            raw_results = search_user_knowledge_base(
+                user_id="guest_user", query=query, limit=limit, document_id=document_id
+            )
 
         for res in raw_results:
             text = res.get("text", "")
             if text:
                 retrieved_texts.append(text)
                 citations_data.append({
-                    "source": res.get("cloudinary_url") or res.get("parent_asset_id", "Uploaded Document"),
+                    "source": res.get("metadata", {}).get("filename") or res.get("cloudinary_url") or "Uploaded Document",
+                    "document_id": res.get("metadata", {}).get("document_id"),
+                    "document_title": res.get("metadata", {}).get("filename"),
                     "page": res.get("metadata", {}).get("page_number", 1),
-                    "snippet": text[:180] + ("..." if len(text) > 180 else ""),
-                    "score": round(float(res.get("score", 0.0)), 3)
+                    "chunk_index": res.get("metadata", {}).get("chunk_index"),
+                    "snippet": text,
+                    "score": round(float(res.get("score", 0.0)), 3),
+                    "metadata": res.get("metadata", {}),
                 })
     except Exception as exc:
         logger.warning(f"Vector retrieval fallback triggered: {exc}")
@@ -127,8 +140,8 @@ def _generate_llm_response(query: str, context_chunks: List[str]) -> str:
     formatted_context = "\n\n---\n\n".join(context_chunks) if context_chunks else "No relevant document excerpts found."
     system_prompt = (
         "You are OmniBrain, an advanced document reasoning agent. Answer the user's question "
-        "thoroughly and directly using the provided document excerpts. If the information is not present "
-        "in the excerpts, use your general knowledge to help, but state that the document did not contain the answer."
+        "directly using only the provided document excerpts. Do not use outside knowledge or infer unsupported facts. "
+        "If the excerpts do not contain the answer, say so clearly, and cite page numbers when available."
     )
     user_prompt = f"Document Context:\n{formatted_context}\n\nUser Question:\n{query}"
 
@@ -154,27 +167,52 @@ def _generate_llm_response(query: str, context_chunks: List[str]) -> str:
         )
 
 
-async def invoke_agent_supervisor(query: str, session_id: str, trace_id: str, filters: Optional[Dict[str, Any]] = None, user_id: str = "guest_user") -> Dict[str, Any]:
+async def invoke_agent_supervisor(
+    query: str,
+    session_id: str,
+    trace_id: str,
+    filters: Optional[Dict[str, Any]] = None,
+    user_id: str = "guest_user",
+    document_id: Optional[str] = None,
+) -> Dict[str, Any]:
     try:
         from app.agents.graph import OmniBrainGraph
         graph = OmniBrainGraph()
-        state = await graph.ainvoke(user_query=query)
+        state = await graph.ainvoke(
+            user_query=query, document_id=document_id, user_id=user_id
+        )
         memo = state.get("final_answer") or state.get("intermediate_answer")
         citations = state.get("citations", [])
         if memo and "No external document or database evidence" not in memo:
+            agent = (
+                "vision_agent" if state.get("vision_results")
+                else "sql_agent" if state.get("sql_results")
+                else "search_agent" if state.get("search_results")
+                else "supervisor"
+            )
             return {
                 "memo": memo,
-                "citations": citations
+                "citations": citations,
+                "agent": agent,
             }
     except Exception as exc:
         logger.warning(f"OmniBrainGraph agent run fallback: {exc}")
 
     # Fallback to direct context retrieval + local synthesis
-    context_chunks, citations = _retrieve_context(query=query, user_id=user_id)
+    context_chunks, citations = _retrieve_context(
+        query=query, user_id=user_id, document_id=document_id
+    )
+    if document_id and not context_chunks:
+        return {
+            "memo": "I couldn't find indexed evidence for this question in the attached document. Please check that indexing completed or try a more specific question.",
+            "citations": [],
+            "agent": "search_agent",
+        }
     memo = _generate_llm_response(query=query, context_chunks=context_chunks)
     return {
         "memo": memo,
-        "citations": citations
+        "citations": citations,
+        "agent": "search_agent" if citations else "supervisor",
     }
 
 
@@ -190,14 +228,22 @@ async def stream_agent_supervisor(query: str, session_id: str, trace_id: str, fi
 
         from app.agents.graph import OmniBrainGraph
         graph = OmniBrainGraph()
-        state = await graph.ainvoke(user_query=query)
+        state = await graph.ainvoke(
+            user_query=query,
+            document_id=(filters or {}).get("doc_id"),
+            user_id=user_id,
+        )
         memo = state.get("final_answer") or state.get("intermediate_answer") or ""
         citations = state.get("citations", [])
     except Exception as exc:
         logger.warning(f"OmniBrainGraph stream fallback: {exc}")
 
     if not memo or "No external document or database evidence" in memo:
-        context_chunks, fallback_citations = _retrieve_context(query=query, user_id=user_id)
+        context_chunks, fallback_citations = _retrieve_context(
+            query=query,
+            user_id=user_id,
+            document_id=(filters or {}).get("doc_id"),
+        )
         memo = _generate_llm_response(query=query, context_chunks=context_chunks)
         citations = fallback_citations if not citations else citations
 
@@ -266,7 +312,8 @@ async def chat_endpoint(
         session_id=request.session_id,
         trace_id=trace_id,
         filters=request.filters,
-        user_id=current_user.username or "guest_user"
+        user_id=current_user.username or "guest_user",
+        document_id=request.doc_id,
     )
 
     raw_memo = agent_output.get("memo", "No response generated.")
@@ -275,9 +322,13 @@ async def chat_endpoint(
     formatted_citations = [
         Citation(
             source=c.get("source", "Unknown Source"),
+            document_id=c.get("document_id"),
+            document_title=c.get("document_title"),
             page=c.get("page") or c.get("page_number", 1),
+            chunk_index=c.get("chunk_index"),
             snippet=c.get("snippet", ""),
-            score=c.get("score")
+            score=c.get("score"),
+            metadata=c.get("metadata", {}),
         )
         for c in agent_output.get("citations", [])
     ]
@@ -303,11 +354,13 @@ async def chat_endpoint(
         memo=sanitized_memo,
         response=sanitized_memo,
         citations=formatted_citations,
+        agent=agent_output.get("agent", "supervisor"),
         generated_at=datetime.now(timezone.utc)
     )
 
 
-@router.get("/history", response_model=HistoryResponse, status_code=status.HTTP_200_OK)
+@router.get("/history", response_model=HistoryResponse, status_code=status.HTTP_200_OK, include_in_schema=False)
+@router.get("/chat/history", response_model=HistoryResponse, status_code=status.HTTP_200_OK)
 async def get_chat_history(
     session_id: str = Query(..., min_length=1, description="Unique identifier for the chat session"),
     authorization: Optional[str] = Header(None)

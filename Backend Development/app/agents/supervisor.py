@@ -141,9 +141,10 @@ async def supervisor_node(
 
     if not state.get("selected_agents"):
 
-        intent, agents = classify_intent(
-            query
-        )
+        if state.get("document_id"):
+            intent, agents = "document_search", [SEARCH_AGENT]
+        else:
+            intent, agents = classify_intent(query)
 
         return {
             "intent": intent,
@@ -268,12 +269,16 @@ async def synthesis_node(
             if text:
                 context_texts.append(text)
                 meta = r.get("metadata", {})
-                source_name = r.get("cloudinary_url") or r.get("parent_asset_id") or meta.get("filename") or "Uploaded Document"
+                source_name = meta.get("filename") or r.get("cloudinary_url") or r.get("parent_asset_id") or "Uploaded Document"
                 citations.append({
                     "source": str(source_name),
+                    "document_id": meta.get("document_id"),
+                    "document_title": meta.get("filename"),
                     "page": meta.get("page_number", 1),
-                    "snippet": text[:180] + ("..." if len(text) > 180 else ""),
-                    "score": round(float(r.get("score", 0.85)), 3)
+                    "chunk_index": meta.get("chunk_index"),
+                    "snippet": text,
+                    "score": round(float(r.get("score", 0.85)), 3),
+                    "metadata": meta,
                 })
 
     # --------------------------------------------------------
@@ -297,7 +302,8 @@ async def synthesis_node(
                 f"Document Context:\n"
                 + "\n\n---\n\n".join(context_texts[:4])
                 + f"\n\nQuestion: {query}\n\n"
-                "Synthesize a clear, concise cited investment memo answering the question directly based on the context:"
+                "Answer directly using only this context. Do not add outside facts or unsupported conclusions. "
+                "If the context does not answer the question, say so. Cite source page numbers when available:"
             )
             resp = ollama.chat(
                 model=chat_model,

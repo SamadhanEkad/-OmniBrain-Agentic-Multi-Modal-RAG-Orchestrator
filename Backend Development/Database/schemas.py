@@ -147,8 +147,9 @@ class Citation(BaseModel):
     """Source citation reference supporting an AI response."""
     id: Optional[UUID] = Field(default_factory=uuid4)
     source: Optional[str] = None
-    document_id: Optional[UUID] = None
+    document_id: Optional[Union[UUID, str]] = None
     document_title: Optional[str] = None
+
     source_type: CitationSource = CitationSource.DOCUMENT
     page: Optional[int] = None
     page_number: Optional[int] = None
@@ -216,6 +217,7 @@ class ChatRequest(BaseModel):
     """High-level query request sent to the RAG pipeline."""
     query: str = Field(..., min_length=1, description="Financial or document query")
     session_id: str = Field(..., description="Active chat session identifier")
+    doc_id: Optional[str] = Field(default=None, description="Restrict retrieval to this uploaded document")
     filters: Optional[Dict[str, Any]] = Field(default=None, description="Metadata filters")
     search_type: Optional[VectorSearchType] = VectorSearchType.HYBRID
 
@@ -226,6 +228,7 @@ class ChatResponse(BaseModel):
     memo: str = Field(..., description="Synthesized response")
     response: Optional[str] = Field(default=None, description="Response text alias")
     citations: List[Citation] = Field(default_factory=list, description="Grounding citations")
+    agent: Optional[str] = Field(default=None, description="Specialist agent that produced the response")
     generated_at: datetime = Field(default_factory=datetime.utcnow)
 
 
@@ -281,6 +284,7 @@ class UploadResponse(BaseModel):
     total_documents: int
     files: List[Dict[str, Any]] = Field(default_factory=list)
     job_id: Optional[str] = None
+    doc_id: Optional[str] = None
     message: Optional[str] = None
 
 

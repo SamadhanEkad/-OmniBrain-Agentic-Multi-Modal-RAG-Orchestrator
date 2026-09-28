@@ -1,24 +1,14 @@
-@import "tailwindcss";
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap');
+@import 'highlight.js/styles/github.css';
 
-@layer base {
-  body {
-    @apply bg-slate-950 text-slate-100 antialiased min-h-screen selection:bg-indigo-500 selection:text-white;
-    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
-  }
-}
-
-/* Custom Scrollbar for chat and documents list */
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-::-webkit-scrollbar-thumb {
-  background: rgba(148, 163, 184, 0.2);
-  border-radius: 9999px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: rgba(148, 163, 184, 0.4);
-}
+* { box-sizing: border-box; }
+html, body, #root { width: 100%; min-width: 320px; height: 100%; min-height: 100%; margin: 0; }
+body { overflow: hidden; background: #fff; color: #202123; font-family: 'DM Sans', 'Segoe UI', sans-serif; font-feature-settings: 'ss01' on; }
+button, textarea { font: inherit; }
+button { -webkit-tap-highlight-color: transparent; }
+::selection { color: #123d33; background: #cbe9df; }
+::-webkit-scrollbar { width: 7px; height: 7px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #d1d2d5; border: 2px solid transparent; border-radius: 8px; background-clip: content-box; }
+::-webkit-scrollbar-thumb:hover { background-color: #a8aaaf; }
+.theme-dark ::-webkit-scrollbar-thumb { background-color: #53545a; }

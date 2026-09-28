@@ -103,15 +103,10 @@ def get_embedding(text: str) -> List[float]:
                 prompt=safe_text
             )
             return response["embedding"]
-        except Exception:
-            # Deterministic pseudo-embedding for local dev when Ollama daemon is offline
-            import hashlib
-            seed = int(hashlib.md5(safe_text.encode("utf-8")).hexdigest()[:8], 16)
-            import numpy as np
-            rng = np.random.default_rng(seed)
-            vec = rng.standard_normal(VECTOR_DIMENSION).tolist()
-            norm = sum(x**2 for x in vec)**0.5 or 1.0
-            return [float(x / norm) for x in vec]
+        except Exception as exc:
+            raise RuntimeError(
+                f"Could not generate embeddings with '{EMBEDDING_MODEL}'. Verify Ollama and the embedding model are available."
+            ) from exc
 
 
 def get_batch_embeddings(texts: List[str]) -> List[List[float]]:
@@ -138,7 +133,8 @@ def embed_and_store_chunks(
     asset_type: str,
     cloudinary_public_id: str = "",
     cloudinary_url: str = "",
-    extra_metadata: Optional[Dict[str, Any]] = None
+    extra_metadata: Optional[Dict[str, Any]] = None,
+    chunk_metadata: Optional[List[Dict[str, Any]]] = None,
 ) -> List[str]:
     """
     Batches embedding requests and persists indexed points to Qdrant.
@@ -169,6 +165,8 @@ def embed_and_store_chunks(
 
         if extra_metadata:
             payload.update(extra_metadata)
+        if chunk_metadata and idx <= len(chunk_metadata):
+            payload.update(chunk_metadata[idx - 1])
 
         points.append(PointStruct(id=point_id, vector=vector, payload=payload))
         stored_ids.append(point_id)
@@ -181,7 +179,8 @@ def embed_and_store_chunks(
                 wait=True
             )
         except Exception as exc:
-            logger.warning(f"Could not persist points to Qdrant (is Qdrant running?): {exc}")
+            logger.error(f"Could not persist points to Qdrant (is Qdrant running?): {exc}")
+            raise RuntimeError("Vector indexing failed; the document was not indexed.") from exc
 
     return stored_ids
 
@@ -190,7 +189,8 @@ def search_user_knowledge_base(
     user_id: str,
     query: str,
     limit: int = 5,
-    score_threshold: Optional[float] = 0.0
+    score_threshold: Optional[float] = 0.0,
+    document_id: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """
     Executes scoped vector search enforcing user-level isolation.
@@ -198,14 +198,14 @@ def search_user_knowledge_base(
     init_qdrant_collection()
     query_vector = get_embedding(query)
 
-    user_filter = Filter(
-        must=[
-            FieldCondition(
-                key="user_id",
-                match=MatchValue(value=str(user_id))
-            )
-        ]
-    )
+    conditions = [
+        FieldCondition(key="user_id", match=MatchValue(value=str(user_id)))
+    ]
+    if document_id:
+        conditions.append(
+            FieldCondition(key="document_id", match=MatchValue(value=str(document_id)))
+        )
+    user_filter = Filter(must=conditions)
 
     try:
         search_results = qdrant_client.query_points(
@@ -231,4 +231,27 @@ def search_user_knowledge_base(
         ]
     except Exception as exc:
         logger.error(f"Failed to query knowledge base: {exc}")
+        return []
+
+
+def get_document_chunks(user_id: str, document_id: str, limit: int = 20) -> List[Dict[str, Any]]:
+    """Return stored chunks for one user's document in reading order."""
+    init_qdrant_collection()
+    try:
+        records, _ = qdrant_client.scroll(
+            collection_name=COLLECTION_NAME,
+            scroll_filter=Filter(
+                must=[
+                    FieldCondition(key="user_id", match=MatchValue(value=str(user_id))),
+                    FieldCondition(key="document_id", match=MatchValue(value=str(document_id))),
+                ]
+            ),
+            limit=limit,
+            with_payload=True,
+            with_vectors=False,
+        )
+        chunks = [record.payload or {} for record in records]
+        return sorted(chunks, key=lambda chunk: chunk.get("chunk_index", 0))
+    except Exception as exc:
+        logger.warning(f"Could not load document chunks for suggestions: {exc}")
         return []

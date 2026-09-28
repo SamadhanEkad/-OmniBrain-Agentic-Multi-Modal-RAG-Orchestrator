@@ -217,7 +217,9 @@ class OmniBrainGraph:
         )
 
         result = await self.search_agent.run(
-            query
+            query,
+            user_id=state.get("user_id", "guest_user"),
+            document_id=state.get("document_id"),
         )
 
         results = result.get(
@@ -301,6 +303,8 @@ class OmniBrainGraph:
         self,
         user_query: str,
         images: list[dict[str, Any]] | None = None,
+        document_id: str | None = None,
+        user_id: str = "guest_user",
     ) -> AgentState:
         """
         Execute the complete OmniBrain agent workflow.
@@ -319,6 +323,8 @@ class OmniBrainGraph:
 
         initial_state: AgentState = {
             "user_query": user_query,
+            "document_id": document_id,
+            "user_id": user_id,
             "conversation_history": [],
 
             "selected_agents": [],

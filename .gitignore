@@ -39,10 +39,13 @@ jwt_secret*
 # OmniBrain Application & Staging Directories
 staging_uploads/
 temp_uploads/
+extracted_tables/
+extracted_images/
 *.pdf
 *.png
 *.jpg
 *.jpeg
+
 
 # Local Vector Databases & Relational DBs
 data/

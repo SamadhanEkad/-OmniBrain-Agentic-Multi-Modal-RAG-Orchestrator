@@ -14,7 +14,12 @@ class SearchAgent:
     def __init__(self, vector_store: Any = None):
         self.vector_store = vector_store
 
-    async def run(self, query: str) -> dict[str, Any]:
+    async def run(
+        self,
+        query: str,
+        user_id: str = "guest_user",
+        document_id: str | None = None,
+    ) -> dict[str, Any]:
         """
         Retrieve relevant document chunks.
         """
@@ -31,7 +36,12 @@ class SearchAgent:
         if self.vector_store is None:
             try:
                 from Ingestion.embedder import search_user_knowledge_base
-                results = search_user_knowledge_base(user_id="guest_user", query=query, limit=5)
+                results = search_user_knowledge_base(
+                    user_id=user_id,
+                    query=query,
+                    limit=5,
+                    document_id=document_id,
+                )
                 return {
                     "success": True,
                     "agent": self.name,
@@ -46,7 +56,11 @@ class SearchAgent:
                 }
 
         try:
-            results = await self.vector_store.search(query)
+            results = await self.vector_store.search(
+                query,
+                user_id=user_id,
+                document_id=document_id,
+            )
 
             return {
                 "success": True,

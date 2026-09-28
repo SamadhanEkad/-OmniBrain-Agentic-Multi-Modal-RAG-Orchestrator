@@ -73,6 +73,11 @@ def extract_pdf_content(
 
         # 1. Text Extraction
         page_text = page.get_text()
+        if not page_text.strip():
+            try:
+                page_text = page.get_textpage_ocr(language="eng", dpi=300).extractText()
+            except Exception:
+                page_text = ""
         extracted_text.append(page_text)
 
         # 2. Table Extraction (Requires PyMuPDF >= 1.23.0)
@@ -82,6 +87,7 @@ def extract_pdf_content(
                 for idx, table in enumerate(table_finder.tables, start=1):
                     df = table.to_pandas()
                     if not df.empty:
+                        df.attrs["page_number"] = page_num
                         extracted_tables.append(df)
                         csv_path = os.path.join(output_table_dir, f"page_{page_num}_table_{idx}.csv")
                         df.to_csv(csv_path, index=False)
@@ -105,6 +111,18 @@ def extract_pdf_content(
                 pix = None
             except Exception as e:
                 print(f"Skipped raster image {img_idx} on page {page_num}: {e}")
+
+        # 3b. Scanned / image-only page fallback:
+        # If the page has no text and no raster images, render the entire page as a scanned image
+        page_has_raster = any(f"page_{page_num}_raster_" in os.path.basename(p) for p in extracted_image_paths)
+        if not page_text.strip() and not raw_images and not page_has_raster:
+            try:
+                pix = page.get_pixmap(dpi=150)
+                scan_img_path = os.path.join(output_img_dir, f"page_{page_num}_scanned_page.png")
+                pix.save(scan_img_path)
+                extracted_image_paths.append(scan_img_path)
+            except Exception as e:
+                print(f"Scanned page rendering skipped on page {page_num}: {e}")
 
         # 4. Vector Diagram Extraction (Clustering nearby vectors/drawings)
         try:

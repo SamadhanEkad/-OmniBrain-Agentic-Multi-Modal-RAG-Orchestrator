@@ -11,6 +11,8 @@ class AgentState(TypedDict, total=False):
     # User input
     # -------------------------
     user_query: str
+    document_id: str | None
+    user_id: str
     conversation_history: list[dict[str, Any]]
 
     # -------------------------

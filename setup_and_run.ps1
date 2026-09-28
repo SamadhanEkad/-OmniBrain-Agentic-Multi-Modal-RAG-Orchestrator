@@ -46,6 +46,7 @@ param (
 $ErrorActionPreference = "Stop"
 
 $RepoRoot = $PSScriptRoot
+Set-Location -Path $RepoRoot
 $BackendDir = Join-Path $RepoRoot "Backend Development"
 $ReactDir = Join-Path $RepoRoot "frontend"
 $StreamlitDir = Join-Path $RepoRoot "Frontend Development"
@@ -60,6 +61,15 @@ $EnvFile = Join-Path $RepoRoot ".env"
 $WingetNodeDir = "$env:LOCALAPPDATA\Microsoft\WinGet\Packages\OpenJS.NodeJS.LTS_Microsoft.Winget.Source_8wekyb3d8bbwe\node-v24.19.0-win-x64"
 if (Test-Path $WingetNodeDir) {
     $env:Path = "$WingetNodeDir;$env:Path"
+}
+
+$NpmCommand = Get-Command npm.cmd -ErrorAction SilentlyContinue
+$UseReact = $WithFrontend -or $WithReact
+$UseStreamlit = $WithStreamlit
+if ($UseReact -and -not $NpmCommand) {
+    Write-Warning "npm was not found in PATH. Falling back to the Streamlit interface at http://localhost:8501."
+    $UseReact = $false
+    $UseStreamlit = $true
 }
 
 Write-Host "==========================================================" -ForegroundColor Cyan
@@ -110,12 +120,11 @@ if (-not $NoInstall) {
     Write-Host "==> Python dependencies installation completed." -ForegroundColor Green
 
     # Install Frontend npm dependencies if React frontend is requested
-    if (($WithFrontend -or $WithReact) -and (Test-Path -Path $ReactDir)) {
+    if ($UseReact -and (Test-Path -Path $ReactDir)) {
         $NodeModulesDir = Join-Path $ReactDir "node_modules"
         if (-not (Test-Path -Path $NodeModulesDir)) {
             Write-Host "==> Installing Node.js frontend dependencies..." -ForegroundColor Yellow
-            $npmCmd = (Get-Command npm.cmd -ErrorAction SilentlyContinue)?.Source ?? "npm"
-            Start-Process -FilePath $npmCmd -ArgumentList "install" -WorkingDirectory $ReactDir -NoNewWindow -Wait
+            Start-Process -FilePath $NpmCommand.Source -ArgumentList "install" -WorkingDirectory $ReactDir -NoNewWindow -Wait
             Write-Host "==> Frontend dependencies installed." -ForegroundColor Green
         }
     }
@@ -131,21 +140,20 @@ $ReactProcess = $null
 $StreamlitProcess = $null
 
 # Launch React Frontend
-if (($WithFrontend -or $WithReact) -and (Test-Path -Path $ReactDir)) {
+if ($UseReact -and (Test-Path -Path $ReactDir)) {
     Write-Host "==> Starting modern React frontend UI on http://localhost:$ReactPort..." -ForegroundColor Cyan
-    $npmCmd = (Get-Command npm.cmd -ErrorAction SilentlyContinue)?.Source ?? "npm"
-    $ReactProcess = Start-Process -FilePath $npmCmd `
+    $ReactProcess = Start-Process -FilePath $NpmCommand.Source `
         -ArgumentList "run dev -- --port $ReactPort" `
         -WorkingDirectory $ReactDir `
         -PassThru
 }
 
 # Launch Streamlit Frontend (if explicitly requested)
-if ($WithStreamlit -and (Test-Path -Path $StreamlitDir)) {
+if ($UseStreamlit -and (Test-Path -Path $StreamlitDir)) {
     Write-Host "==> Starting Streamlit frontend UI on http://localhost:8501..." -ForegroundColor Cyan
     $StreamlitProcess = Start-Process -FilePath $VenvPython `
         -ArgumentList "-m streamlit run `"$StreamlitDir\app.py`"" `
-        -WorkingDirectory $StreamlitDir `
+        -WorkingDirectory $RepoRoot `
         -PassThru
 }
 
